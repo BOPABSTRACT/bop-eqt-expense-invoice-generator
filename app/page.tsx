@@ -11,17 +11,40 @@ const COMPANY_OPTIONS = [
 
 const MANAGER_OPTIONS = [
   'Andrew Restanio',
-  'Fred Rousch',
-  'Kurt Stephens',
-  'J.J. Courie',
-  'Wesley Rosenbaugh',
   'Bryan Hollihan',
-  'Sean Cotter',
-  'Mitchell Shwartz',
   'Carrick Tuck',
-  'Torey Sochaki',
   'Eric Strouth',
+  'Fred Rousch',
+  'J.J. Courie',
   'Kristina Hancock',
+  'Kurt Stephens',
+  'Mitchell Shwartz',
+  'Sean Cotter',
+  'Torey Sochaki',
+  'Wesley Rosenbaugh',
+]
+
+const AFE_OPTIONS = [
+  { label: 'EQT Greene Mineral Purchasing', afe: 'N34621.2401.1014' },
+  { label: 'EQT Greene County Title/Curative AFE', afe: 'N34621.2401.1011' },
+  { label: 'EQT Washington Mineral Purchasing AFE', afe: 'N34622.2401.1014' },
+  { label: 'EQT Washington County Title/Curative AFE', afe: 'N34622.2401.1011' },
+  { label: 'EQT Allegheny Mineral Purchasing AFE', afe: 'N34620.2401.1014' },
+  { label: 'EQT Allegheny County Title/Curative AFE', afe: 'N34620.2401.1011' },
+  { label: 'EQT Westmoreland Mineral Purchasing AFE', afe: 'N34623.2401.1014' },
+  { label: 'EQT Westmoreland Title/Curative AFE', afe: 'N34623.2401.1011' },
+  { label: 'EQT Monongalia WV Mineral Purchasing AFE', afe: 'N34627.2401.1014' },
+  { label: 'EQT Monongalia WV Title/Curative AFE', afe: 'N34627.2401.1011' },
+  { label: 'EQT Wetzel County WV Mineral Purchasing', afe: 'N34629.2401.1014' },
+  { label: 'EQT Wetzel County WV Title/Curative AFE', afe: 'N34629.2401.1011' },
+  { label: 'EQT Fayette Mineral Purchasing', afe: 'NTBD.2401.1014' },
+  { label: 'EQT Fayette County Title/Curative AFE', afe: 'NTBD.2401.1011' },
+  { label: 'EQT Belmont Mineral Purchasing', afe: 'N34619.2401.1014' },
+  { label: 'EQT Belmont County Title/Curative AFE', afe: 'N34619.2401.1011' },
+  { label: 'EQT Marion Mineral Purchasing', afe: 'N34625.2401.1014' },
+  { label: 'EQT Marion County Title/Curative AFE', afe: 'N34625.2401.1011' },
+  { label: 'EQT Marshall Mineral Purchasing', afe: 'N34626.2401.1014' },
+  { label: 'EQT Marshall County Title/Curative AFE', afe: 'N34626.2401.1011' },
 ]
 
 const COUNTY_OPTIONS = [
@@ -44,7 +67,7 @@ export default function Home() {
   const [receiptFiles, setReceiptFiles] = useState<File[]>([])
   const [companyName, setCompanyName] = useState('')
   const [manager, setManager] = useState('')
-  const [afe, setAfe] = useState('')
+  const [afeKey, setAfeKey] = useState('')
   const [county, setCounty] = useState('')
   const [invoiceDate, setInvoiceDate] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
@@ -80,12 +103,16 @@ export default function Home() {
     setStatus('loading')
     setMessage('Generating invoices...')
 
+    // Find the AFE number from the selected key
+    const selectedAfe = AFE_OPTIONS.find(o => o.afe === afeKey)
+    const afeNumber = selectedAfe?.afe || ''
+
     const formData = new FormData()
     excelFiles.forEach(f => formData.append('excel', f))
     receiptFiles.forEach(f => formData.append('receipts', f))
     formData.append('companyName', companyName)
     formData.append('manager', manager)
-    formData.append('afe', afe.trim())
+    formData.append('afe', afeNumber)
     formData.append('county', county)
     formData.append('invoiceDate', invoiceDate.trim())
 
@@ -161,7 +188,7 @@ export default function Home() {
     fontFamily: "'Georgia', serif", boxSizing: 'border-box' as const, outline: 'none',
     cursor: 'pointer', appearance: 'none' as const,
     backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23c8a96e' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`,
-    backgroundRepeat: 'no-repeat',
+    backgroundRepeat: 'no-repeat' as const,
     backgroundPosition: 'right 14px center',
     paddingRight: '36px',
   }
@@ -171,6 +198,8 @@ export default function Home() {
     border: '1px solid #2a2a3a', borderRadius: 6, color: '#e8e0d0', fontSize: 14,
     fontFamily: "'Georgia', serif", boxSizing: 'border-box' as const, outline: 'none',
   }
+
+  const labelStyle = { fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }
 
   return (
     <main style={{ minHeight: '100vh', background: '#0f1117', fontFamily: "'Georgia', serif", color: '#e8e0d0' }}>
@@ -234,48 +263,49 @@ export default function Home() {
         <Section number="3" title="Invoice Details">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-            {/* Company Name */}
             <div>
-              <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>Company Name *</div>
+              <div style={labelStyle}>Company Name *</div>
               <select value={companyName} onChange={e => setCompanyName(e.target.value)} style={selectStyle}>
                 <option value="">— Select company —</option>
                 {COMPANY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             </div>
 
-            {/* Manager */}
             <div>
-              <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>Manager / Attn</div>
+              <div style={labelStyle}>Manager / Attn</div>
               <select value={manager} onChange={e => setManager(e.target.value)} style={selectStyle}>
                 <option value="">— Select manager —</option>
                 {MANAGER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             </div>
 
-            {/* AFE */}
             <div>
-              <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>AFE #</div>
-              <input
-                type="text"
-                placeholder="e.g. N34620.2401.1014"
-                value={afe}
-                onChange={e => setAfe(e.target.value)}
-                style={inputStyle}
-              />
+              <div style={labelStyle}>AFE</div>
+              <select value={afeKey} onChange={e => setAfeKey(e.target.value)} style={selectStyle}>
+                <option value="">— Select AFE —</option>
+                {AFE_OPTIONS.map(o => (
+                  <option key={o.afe} value={o.afe}>
+                    {o.label} — {o.afe}
+                  </option>
+                ))}
+              </select>
+              {afeKey && (
+                <div style={{ fontSize: 11, color: '#c8a96e', marginTop: 4 }}>
+                  AFE number on invoice: {afeKey}
+                </div>
+              )}
             </div>
 
-            {/* County */}
             <div>
-              <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>County</div>
+              <div style={labelStyle}>County</div>
               <select value={county} onChange={e => setCounty(e.target.value)} style={selectStyle}>
                 <option value="">— Select county —</option>
                 {COUNTY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             </div>
 
-            {/* Invoice Date */}
             <div>
-              <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>Invoice Date *</div>
+              <div style={labelStyle}>Invoice Date *</div>
               <input
                 type="text"
                 placeholder="e.g. May 8, 2026"
@@ -283,7 +313,7 @@ export default function Home() {
                 onChange={e => setInvoiceDate(e.target.value)}
                 style={inputStyle}
               />
-              <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Date to appear on all invoices — any format accepted</div>
+              <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Any format accepted</div>
             </div>
 
           </div>
