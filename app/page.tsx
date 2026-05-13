@@ -4,6 +4,38 @@ import { useState, useRef } from 'react'
 
 const LOGO = "https://i.imgur.com/szjzoxt.png"
 
+const COMPANY_OPTIONS = [
+  'BOP Abstract, LLC',
+  'BOP Acquisition, LLC',
+]
+
+const MANAGER_OPTIONS = [
+  'Andrew Restanio',
+  'Fred Rousch',
+  'Kurt Stephens',
+  'J.J. Courie',
+  'Wesley Rosenbaugh',
+  'Bryan Hollihan',
+  'Sean Cotter',
+  'Mitchell Shwartz',
+  'Carrick Tuck',
+  'Torey Sochaki',
+  'Eric Strouth',
+  'Kristina Hancock',
+]
+
+const COUNTY_OPTIONS = [
+  'Allegheny',
+  'Fayette',
+  'Greene',
+  'Lycoming',
+  'Marion',
+  'Monongalia',
+  'Washington',
+  'Wetzel',
+  'Westmoreland',
+]
+
 export default function Home() {
   const [authenticated, setAuthenticated] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
@@ -12,6 +44,7 @@ export default function Home() {
   const [receiptFiles, setReceiptFiles] = useState<File[]>([])
   const [companyName, setCompanyName] = useState('')
   const [manager, setManager] = useState('')
+  const [afe, setAfe] = useState('')
   const [county, setCounty] = useState('')
   const [invoiceDate, setInvoiceDate] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
@@ -34,8 +67,8 @@ export default function Home() {
       setStatus('error')
       return
     }
-    if (!companyName.trim()) {
-      setMessage('Please enter the Company Name.')
+    if (!companyName) {
+      setMessage('Please select a Company Name.')
       setStatus('error')
       return
     }
@@ -50,9 +83,10 @@ export default function Home() {
     const formData = new FormData()
     excelFiles.forEach(f => formData.append('excel', f))
     receiptFiles.forEach(f => formData.append('receipts', f))
-    formData.append('companyName', companyName.trim())
-    formData.append('manager', manager.trim())
-    formData.append('county', county.trim())
+    formData.append('companyName', companyName)
+    formData.append('manager', manager)
+    formData.append('afe', afe.trim())
+    formData.append('county', county)
     formData.append('invoiceDate', invoiceDate.trim())
 
     try {
@@ -121,6 +155,23 @@ export default function Home() {
     )
   }
 
+  const selectStyle = {
+    width: '100%', padding: '11px 16px', background: '#0d0f14',
+    border: '1px solid #2a2a3a', borderRadius: 6, color: '#e8e0d0', fontSize: 14,
+    fontFamily: "'Georgia', serif", boxSizing: 'border-box' as const, outline: 'none',
+    cursor: 'pointer', appearance: 'none' as const,
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23c8a96e' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 14px center',
+    paddingRight: '36px',
+  }
+
+  const inputStyle = {
+    width: '100%', padding: '11px 16px', background: '#0d0f14',
+    border: '1px solid #2a2a3a', borderRadius: 6, color: '#e8e0d0', fontSize: 14,
+    fontFamily: "'Georgia', serif", boxSizing: 'border-box' as const, outline: 'none',
+  }
+
   return (
     <main style={{ minHeight: '100vh', background: '#0f1117', fontFamily: "'Georgia', serif", color: '#e8e0d0' }}>
       <header style={{
@@ -182,34 +233,59 @@ export default function Home() {
 
         <Section number="3" title="Invoice Details">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <LabeledInput
-              label="Company Name *"
-              placeholder="e.g. BOP Abstract, LLC or BOP Acquisition, LLC"
-              value={companyName}
-              onChange={setCompanyName}
-              hint="Appears in the BOP header at the top of the invoice"
-            />
-            <LabeledInput
-              label="Manager / Attn"
-              placeholder="e.g. Andrew Restanio"
-              value={manager}
-              onChange={setManager}
-              hint="Appears in the Attn: field of the Bill To section"
-            />
-            <LabeledInput
-              label="County"
-              placeholder="e.g. Allegheny"
-              value={county}
-              onChange={setCounty}
-              hint="Appears in the County field on the invoice"
-            />
-            <LabeledInput
-              label="Invoice Date *"
-              placeholder="e.g. May 8, 2026"
-              value={invoiceDate}
-              onChange={setInvoiceDate}
-              hint="Date to appear on all invoices — any format accepted"
-            />
+
+            {/* Company Name */}
+            <div>
+              <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>Company Name *</div>
+              <select value={companyName} onChange={e => setCompanyName(e.target.value)} style={selectStyle}>
+                <option value="">— Select company —</option>
+                {COMPANY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+
+            {/* Manager */}
+            <div>
+              <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>Manager / Attn</div>
+              <select value={manager} onChange={e => setManager(e.target.value)} style={selectStyle}>
+                <option value="">— Select manager —</option>
+                {MANAGER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+
+            {/* AFE */}
+            <div>
+              <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>AFE #</div>
+              <input
+                type="text"
+                placeholder="e.g. N34620.2401.1014"
+                value={afe}
+                onChange={e => setAfe(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            {/* County */}
+            <div>
+              <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>County</div>
+              <select value={county} onChange={e => setCounty(e.target.value)} style={selectStyle}>
+                <option value="">— Select county —</option>
+                {COUNTY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+
+            {/* Invoice Date */}
+            <div>
+              <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>Invoice Date *</div>
+              <input
+                type="text"
+                placeholder="e.g. May 8, 2026"
+                value={invoiceDate}
+                onChange={e => setInvoiceDate(e.target.value)}
+                style={inputStyle}
+              />
+              <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>Date to appear on all invoices — any format accepted</div>
+            </div>
+
           </div>
         </Section>
 
@@ -252,32 +328,6 @@ export default function Home() {
         </div>
       </div>
     </main>
-  )
-}
-
-function LabeledInput({ label, placeholder, value, onChange, hint }: {
-  label: string
-  placeholder: string
-  value: string
-  onChange: (v: string) => void
-  hint?: string
-}) {
-  return (
-    <div>
-      <div style={{ fontSize: 13, color: '#c8a96e', marginBottom: 6, fontWeight: 500 }}>{label}</div>
-      <input
-        type="text"
-        placeholder={placeholder}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        style={{
-          width: '100%', padding: '11px 16px', background: '#0d0f14',
-          border: '1px solid #2a2a3a', borderRadius: 6, color: '#e8e0d0', fontSize: 14,
-          fontFamily: "'Georgia', serif", boxSizing: 'border-box', outline: 'none',
-        }}
-      />
-      {hint && <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>{hint}</div>}
-    </div>
   )
 }
 
