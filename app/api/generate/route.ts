@@ -24,6 +24,18 @@ function normalizeInvoiceDate(input: string): string {
   return input
 }
 
+// Format date as M.DD.YY for filename
+function filenameDateFormat(input: string): string {
+  const d = new Date(input)
+  if (!isNaN(d.getTime())) {
+    const month = d.getMonth() + 1
+    const day = String(d.getDate()).padStart(2, '0')
+    const year = String(d.getFullYear()).slice(-2)
+    return `${month}.${day}.${year}`
+  }
+  return input.replace(/[^0-9.]/g, '_')
+}
+
 function sanitize(name: string): string {
   return name.replace(/[^a-zA-Z0-9_\-. #,]/g, '_').trim()
 }
@@ -49,6 +61,7 @@ async function buildInvoicePdf(
   excelBuffer: Buffer,
   companyName: string,
   manager: string,
+  afeOverride: string,
   countyOverride: string,
   invoiceDateOverride: string,
   matchedReceiptBuffer: Buffer | null,
@@ -67,9 +80,9 @@ async function buildInvoicePdf(
   const bopCompany = companyName || String((summaryRows[0] as unknown[])?.[0] ?? 'BOP Abstract, LLC')
   const invoiceNum = String((summaryRows[7] as unknown[])?.[5] ?? '')
   const invoiceDate = invoiceDateOverride || String((summaryRows[7] as unknown[])?.[1] ?? '')
-  const afe = String((summaryRows[9] as unknown[])?.[5] ?? '')
+  const afeFromSheet = String((summaryRows[9] as unknown[])?.[5] ?? '')
+  const afe = afeOverride || afeFromSheet
   const attn = manager ? `Attn: ${manager}` : String((summaryRows[10] as unknown[])?.[1] ?? '')
-  const project = String((summaryRows[13] as unknown[])?.[5] ?? '')
   const period = String((summaryRows[15] as unknown[])?.[1] ?? '')
   const county = countyOverride || ''
 
@@ -165,7 +178,6 @@ async function buildInvoicePdf(
   doc.text(BILL_TO.city, lx + 52, ly); ly += 13
 
   if (afe) rightLabel('AFE#:', afe)
-  if (project) rightLabel('Project:', project)
   if (county) rightLabel('County:', `${county}, PA`)
 
   ly += 8
@@ -391,9 +403,11 @@ export async function POST(req: NextRequest) {
     const receiptFiles = formData.getAll('receipts') as File[]
     const companyName = (formData.get('companyName') as string) || 'BOP Abstract, LLC'
     const manager = (formData.get('manager') as string) || ''
+    const afe = (formData.get('afe') as string) || ''
     const county = (formData.get('county') as string) || ''
     const rawDate = (formData.get('invoiceDate') as string) || ''
     const invoiceDateOverride = normalizeInvoiceDate(rawDate)
+    const fileDateStr = filenameDateFormat(rawDate)
 
     if (!excelFiles.length) return NextResponse.json({ error: 'No Excel files uploaded' }, { status: 400 })
 
@@ -411,17 +425,21 @@ export async function POST(req: NextRequest) {
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][]
       const invoiceNum = String((rows[7] as unknown[])?.[5] ?? '').trim() ||
         (excelFile.name.match(/(\d{5,})/)?.[1] ?? 'UNKNOWN')
-      const period = String((rows[15] as unknown[])?.[1] ?? '').trim()
 
       const matchedReceipt = matchReceipt(invoiceNum, receiptData)
 
+      // Build filename: BOP Acquisition - EQT - Andrew Restanio - Allegheny County - Expense Invoice - 4.30.26
       const shortCompany = companyName.replace(/, LLC|, Inc\.?/gi, '').trim()
-      const countyPart = county ? `${county} County ` : ''
-      const outputName = sanitize(`${shortCompany} - EQT ${countyPart}Expenses - ${period}`)
+      const parts = [shortCompany, 'EQT']
+      if (manager) parts.push(manager)
+      if (county) parts.push(`${county} County`)
+      parts.push('Expense Invoice')
+      parts.push(fileDateStr)
+      const outputName = sanitize(parts.join(' - '))
 
       try {
         const pdfBuffer = await buildInvoicePdf(
-          excelBuffer, companyName, manager, county, invoiceDateOverride, matchedReceipt
+          excelBuffer, companyName, manager, afe, county, invoiceDateOverride, matchedReceipt
         )
         zip.file(`${outputName}.pdf`, pdfBuffer)
       } catch (err) {
