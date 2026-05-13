@@ -24,7 +24,6 @@ function normalizeInvoiceDate(input: string): string {
   return input
 }
 
-// Format date as M.DD.YY for filename
 function filenameDateFormat(input: string): string {
   const d = new Date(input)
   if (!isNaN(d.getTime())) {
@@ -34,6 +33,16 @@ function filenameDateFormat(input: string): string {
     return `${month}.${day}.${year}`
   }
   return input.replace(/[^0-9.]/g, '_')
+}
+
+function extractPeriodEndDate(period: string): string {
+  // Period looks like "4-1 to 4-30-2026" — extract the last date after "to "
+  const match = period.match(/to\s+(\d{1,2}-\d{1,2}-\d{4})/i)
+  if (match) return filenameDateFormat(match[1].replace(/-/g, '/'))
+  // fallback: try last date-like pattern in the string
+  const dates = [...period.matchAll(/\d{1,2}-\d{1,2}-\d{4}/g)]
+  if (dates.length > 0) return filenameDateFormat(dates[dates.length - 1][0].replace(/-/g, '/'))
+  return period
 }
 
 function sanitize(name: string): string {
@@ -407,7 +416,6 @@ export async function POST(req: NextRequest) {
     const county = (formData.get('county') as string) || ''
     const rawDate = (formData.get('invoiceDate') as string) || ''
     const invoiceDateOverride = normalizeInvoiceDate(rawDate)
-    const fileDateStr = filenameDateFormat(rawDate)
 
     if (!excelFiles.length) return NextResponse.json({ error: 'No Excel files uploaded' }, { status: 400 })
 
@@ -425,6 +433,10 @@ export async function POST(req: NextRequest) {
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][]
       const invoiceNum = String((rows[7] as unknown[])?.[5] ?? '').trim() ||
         (excelFile.name.match(/(\d{5,})/)?.[1] ?? 'UNKNOWN')
+
+      // Get period from Excel and extract end date for filename
+      const period = String((rows[15] as unknown[])?.[1] ?? '').trim()
+      const fileDateStr = period ? extractPeriodEndDate(period) : filenameDateFormat(rawDate)
 
       const matchedReceipt = matchReceipt(invoiceNum, receiptData)
 
