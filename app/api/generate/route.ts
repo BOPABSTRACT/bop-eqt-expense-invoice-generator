@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import JSZip from 'jszip'
@@ -99,7 +98,7 @@ async function buildInvoicePdf(
   // Detect template type from Summary header row (row index 17 = row 18 in Excel)
   const summaryHeaderRow = (summaryRows[17] as unknown[] ?? []).map(h => String(h ?? '').toLowerCase())
   const isMileageTemplate = summaryHeaderRow.some(h => h.includes('mile') || h.includes('mileage'))
-  const isDayrateTemplate = summaryHeaderRow.some(h => h.includes('day') || h.includes('professional service'))
+  const isDayrateTemplate = !isMileageTemplate && summaryHeaderRow.some(h => h.includes('day') || h.includes('professional service'))
 
   const brokerRows: unknown[][] = []
   for (let i = 18; i < summaryRows.length; i++) {
@@ -122,12 +121,12 @@ async function buildInvoicePdf(
     return row[0] && String(row[0]).trim() !== ''
   })
 
-  const black = [0, 0, 0] as [number, number, number]
-  const red = [255, 0, 0] as [number, number, number]
-  const headerBg = [242, 220, 219] as [number, number, number]
-  const totalsBg = [255, 255, 0] as [number, number, number]
-  const white = [255, 255, 255] as [number, number, number]
-  const lightGray = [100, 100, 100] as [number, number, number]
+  const black: [number, number, number] = [0, 0, 0]
+  const red: [number, number, number] = [255, 0, 0]
+  const headerBg: [number, number, number] = [242, 220, 219]
+  const totalsBg: [number, number, number] = [255, 255, 0]
+  const white: [number, number, number] = [255, 255, 255]
+  const lightGray: [number, number, number] = [100, 100, 100]
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' })
 
@@ -208,12 +207,38 @@ async function buildInvoicePdf(
   let summaryBody: string[][]
   let totalColIndex: number
 
-  if (isMileageTemplate) {
-    // ---- MILEAGE TEMPLATE ----
-    // Summary cols: [0]=Broker [4]=Miles [5]=MileageAmt [6]=Misc(if present) [7 or 6]=TOTAL
+  if (isDayrateTemplate) {
+    // ---- DAYRATE TEMPLATE ----
+    // Summary cols: [0]=Broker [1]=Days [2]=AmtPerDay [3]=TotalProfServices [4]=Misc [5]=TOTAL
+    const hasMisc = summaryHeaderRow.some(h => h.includes('misc'))
+    if (hasMisc) {
+      summaryHead = [['Broker', 'Days', 'Day Rate', 'Professional\nServices', 'Miscellaneous', 'TOTAL']]
+      totalColIndex = 5
+      summaryBody = brokerDataRows.map(r => {
+        const row = r as unknown[]
+        return [String(row[0] ?? ''), fmtNum(row[1], 0), fmtCurrency(row[2]), fmtCurrency(row[3]), fmtCurrency(row[4]), fmtCurrency(row[5])]
+      })
+      if (brokerTotalsRow) {
+        const t = brokerTotalsRow as unknown[]
+        summaryBody.push(['Totals', fmtNum(t[1], 0), fmtCurrency(t[2]), fmtCurrency(t[3]), fmtCurrency(t[4]), fmtCurrency(t[5])])
+      }
+    } else {
+      summaryHead = [['Broker', 'Days', 'Day Rate', 'Professional\nServices', 'TOTAL']]
+      totalColIndex = 4
+      summaryBody = brokerDataRows.map(r => {
+        const row = r as unknown[]
+        return [String(row[0] ?? ''), fmtNum(row[1], 0), fmtCurrency(row[2]), fmtCurrency(row[3]), fmtCurrency(row[4])]
+      })
+      if (brokerTotalsRow) {
+        const t = brokerTotalsRow as unknown[]
+        summaryBody.push(['Totals', fmtNum(t[1], 0), fmtCurrency(t[2]), fmtCurrency(t[3]), fmtCurrency(t[4])])
+      }
+    }
+  } else {
+    // ---- MILEAGE TEMPLATE (default) ----
+    // Summary cols: [0]=Broker [4]=Miles [5]=MileageAmt [6]=Misc [7]=TOTAL
     const hasMisc = summaryHeaderRow.some(h => h.includes('misc'))
     const hasCopies = summaryHeaderRow.some(h => h.includes('cop'))
-
     if (hasMisc && hasCopies) {
       summaryHead = [['Broker', 'Miles\nDriven', 'Mileage Amt\n@ 0.7250/mile', 'Miscellaneous', 'Copies', 'TOTAL']]
       totalColIndex = 5
@@ -247,46 +272,6 @@ async function buildInvoicePdf(
         const t = brokerTotalsRow as unknown[]
         summaryBody.push(['Totals', fmtNum(t[4]), fmtCurrency(t[5]), fmtCurrency(t[6])])
       }
-    }
-  } else if (isDayrateTemplate) {
-    // ---- DAYRATE TEMPLATE ----
-    // Summary cols: [0]=Broker [1]=Days [2]=AmtPerDay [3]=TotalProfServices [4]=Misc [5]=TOTAL
-    const hasMisc = summaryHeaderRow.some(h => h.includes('misc'))
-
-    if (hasMisc) {
-      summaryHead = [['Broker', 'Days', 'Day Rate', 'Professional\nServices', 'Miscellaneous', 'TOTAL']]
-      totalColIndex = 5
-      summaryBody = brokerDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), fmtNum(row[1], 0), fmtCurrency(row[2]), fmtCurrency(row[3]), fmtCurrency(row[4]), fmtCurrency(row[5])]
-      })
-      if (brokerTotalsRow) {
-        const t = brokerTotalsRow as unknown[]
-        summaryBody.push(['Totals', fmtNum(t[1], 0), fmtCurrency(t[2]), fmtCurrency(t[3]), fmtCurrency(t[4]), fmtCurrency(t[5])])
-      }
-    } else {
-      summaryHead = [['Broker', 'Days', 'Day Rate', 'Professional\nServices', 'TOTAL']]
-      totalColIndex = 4
-      summaryBody = brokerDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), fmtNum(row[1], 0), fmtCurrency(row[2]), fmtCurrency(row[3]), fmtCurrency(row[4])]
-      })
-      if (brokerTotalsRow) {
-        const t = brokerTotalsRow as unknown[]
-        summaryBody.push(['Totals', fmtNum(t[1], 0), fmtCurrency(t[2]), fmtCurrency(t[3]), fmtCurrency(t[4])])
-      }
-    }
-  } else {
-    // Fallback: treat as mileage template no-misc
-    summaryHead = [['Broker', 'Miles\nDriven', 'Mileage Amt\n@ 0.7250/mile', 'TOTAL']]
-    totalColIndex = 3
-    summaryBody = brokerDataRows.map(r => {
-      const row = r as unknown[]
-      return [String(row[0] ?? ''), fmtNum(row[4]), fmtCurrency(row[5]), fmtCurrency(row[6])]
-    })
-    if (brokerTotalsRow) {
-      const t = brokerTotalsRow as unknown[]
-      summaryBody.push(['Totals', fmtNum(t[4]), fmtCurrency(t[5]), fmtCurrency(t[6])])
     }
   }
 
@@ -341,8 +326,7 @@ async function buildInvoicePdf(
   let detailTotalCol: number
 
   if (detailIsMileage) {
-    // ---- MILEAGE DETAIL TEMPLATE ----
-    // cols: [0]=Landman [1]=Date [2]=Prospect [3]=Legal [8]=Miles [9]=MileageAmt [10 or 11]=Misc [11 or 13]=Total [12 or 14]=Description
+    // ---- MILEAGE DETAIL ----
     let totalMiles = 0, totalMileageAmt = 0, totalMisc = 0, totalTotal = 0
     detailDataRows.forEach(r => {
       const row = r as unknown[]
@@ -355,16 +339,12 @@ async function buildInvoicePdf(
         totalTotal += Number(row[11] ?? 0)
       }
     })
-
     if (detailHasMisc) {
       detailHead = [['Landman', 'Date', 'Prospect', 'Legal', 'Miles', 'Mileage\n0.7250/mi', 'Misc.', 'Total', 'Description']]
       detailTotalCol = 7
       detailBody = detailDataRows.map(r => {
         const row = r as unknown[]
-        return [
-          String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''),
-          fmtNum(row[8], 1), fmtCurrency(row[9]), fmtCurrency(row[11]), fmtCurrency(row[13]), String(row[14] ?? ''),
-        ]
+        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[8], 1), fmtCurrency(row[9]), fmtCurrency(row[11]), fmtCurrency(row[13]), String(row[14] ?? '')]
       })
       detailBody.push(['Totals', '', '', '', fmtNum(totalMiles, 1), fmtCurrency(totalMileageAmt), fmtCurrency(totalMisc), fmtCurrency(totalTotal), ''])
     } else {
@@ -372,15 +352,12 @@ async function buildInvoicePdf(
       detailTotalCol = 6
       detailBody = detailDataRows.map(r => {
         const row = r as unknown[]
-        return [
-          String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''),
-          fmtNum(row[8], 1), fmtCurrency(row[9]), fmtCurrency(row[11]), String(row[12] ?? ''),
-        ]
+        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[8], 1), fmtCurrency(row[9]), fmtCurrency(row[11]), String(row[12] ?? '')]
       })
       detailBody.push(['Totals', '', '', '', fmtNum(totalMiles, 1), fmtCurrency(totalMileageAmt), fmtCurrency(totalTotal), ''])
     }
   } else {
-    // ---- DAYRATE DETAIL TEMPLATE ----
+    // ---- DAYRATE DETAIL ----
     // cols: [0]=Landman [1]=Date [2]=Prospect [3]=Legal [4]=ProjectFocus [5]=Days [6]=DayrateAmt [7]=LaborTotal [8]=Misc [9]=MiscDesc [10]=Total [11]=Description
     let totalDays = 0, totalLabor = 0, totalMisc = 0, totalTotal = 0
     detailDataRows.forEach(r => {
@@ -394,16 +371,12 @@ async function buildInvoicePdf(
         totalTotal += Number(row[7] ?? 0)
       }
     })
-
     if (detailHasMisc) {
       detailHead = [['Landman', 'Date', 'Prospect', 'Legal', 'Days', 'Day Rate', 'Labor\nTotal', 'Misc.', 'Total', 'Description']]
       detailTotalCol = 8
       detailBody = detailDataRows.map(r => {
         const row = r as unknown[]
-        return [
-          String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''),
-          fmtNum(row[5], 0), fmtCurrency(row[6]), fmtCurrency(row[7]), fmtCurrency(row[8]), fmtCurrency(row[10]), String(row[11] ?? ''),
-        ]
+        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[5], 0), fmtCurrency(row[6]), fmtCurrency(row[7]), fmtCurrency(row[8]), fmtCurrency(row[10]), String(row[11] ?? '')]
       })
       detailBody.push(['Totals', '', '', '', fmtNum(totalDays, 0), '', fmtCurrency(totalLabor), fmtCurrency(totalMisc), fmtCurrency(totalTotal), ''])
     } else {
@@ -411,10 +384,7 @@ async function buildInvoicePdf(
       detailTotalCol = 6
       detailBody = detailDataRows.map(r => {
         const row = r as unknown[]
-        return [
-          String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''),
-          fmtNum(row[5], 0), fmtCurrency(row[6]), fmtCurrency(row[7]), String(row[11] ?? ''),
-        ]
+        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[5], 0), fmtCurrency(row[6]), fmtCurrency(row[7]), String(row[11] ?? '')]
       })
       detailBody.push(['Totals', '', '', '', fmtNum(totalDays, 0), '', fmtCurrency(totalTotal), ''])
     }
@@ -422,59 +392,26 @@ async function buildInvoicePdf(
 
   const detailTotalsIndex = detailBody.length - 1
 
+  const mileageMiscCols = { 0: { cellWidth: 55 }, 1: { cellWidth: 45 }, 2: { cellWidth: 60 }, 3: { cellWidth: 55 }, 4: { cellWidth: 30, halign: 'center' as const }, 5: { cellWidth: 52, halign: 'right' as const }, 6: { cellWidth: 45, halign: 'right' as const }, 7: { cellWidth: 45, halign: 'right' as const }, 8: { cellWidth: 145 } }
+  const mileageNoMiscCols = { 0: { cellWidth: 55 }, 1: { cellWidth: 45 }, 2: { cellWidth: 65 }, 3: { cellWidth: 60 }, 4: { cellWidth: 30, halign: 'center' as const }, 5: { cellWidth: 55, halign: 'right' as const }, 6: { cellWidth: 55, halign: 'right' as const }, 7: { cellWidth: 167 } }
+  const dayrateMiscCols = { 0: { cellWidth: 55 }, 1: { cellWidth: 42 }, 2: { cellWidth: 60 }, 3: { cellWidth: 50 }, 4: { cellWidth: 25, halign: 'center' as const }, 5: { cellWidth: 48, halign: 'right' as const }, 6: { cellWidth: 45, halign: 'right' as const }, 7: { cellWidth: 40, halign: 'right' as const }, 8: { cellWidth: 40, halign: 'right' as const }, 9: { cellWidth: 127 } }
+  const dayrateNoMiscCols = { 0: { cellWidth: 55 }, 1: { cellWidth: 45 }, 2: { cellWidth: 70 }, 3: { cellWidth: 60 }, 4: { cellWidth: 28, halign: 'center' as const }, 5: { cellWidth: 52, halign: 'right' as const }, 6: { cellWidth: 52, halign: 'right' as const }, 7: { cellWidth: 170 } }
+
+  let detailColStyles: Record<number, object>
+  if (detailIsMileage) {
+    detailColStyles = detailHasMisc ? mileageMiscCols : mileageNoMiscCols
+  } else {
+    detailColStyles = detailHasMisc ? dayrateMiscCols : dayrateNoMiscCols
+  }
+
   autoTable(doc, {
     startY: 60,
     head: detailHead,
     body: detailBody,
     theme: 'grid',
-    styles: {
-      font: 'helvetica', fontSize: 7, textColor: black, fillColor: white,
-      cellPadding: 3, lineColor: black, lineWidth: 0.3,
-      overflow: 'linebreak', valign: 'top',
-    },
+    styles: { font: 'helvetica', fontSize: 7, textColor: black, fillColor: white, cellPadding: 3, lineColor: black, lineWidth: 0.3, overflow: 'linebreak', valign: 'top' },
     headStyles: { textColor: black, fillColor: headerBg, fontStyle: 'bold', halign: 'center', valign: 'middle' },
-    columnStyles: detailIsMileage
-      ? (detailHasMisc ? {
-          0: { cellWidth: 55, overflow: 'linebreak' },
-          1: { cellWidth: 45 },
-          2: { cellWidth: 60, overflow: 'linebreak' },
-          3: { cellWidth: 55, overflow: 'linebreak' },
-          4: { cellWidth: 30, halign: 'center' },
-          5: { cellWidth: 52, halign: 'right' },
-          6: { cellWidth: 45, halign: 'right' },
-          7: { cellWidth: 45, halign: 'right' },
-          8: { cellWidth: 145, overflow: 'linebreak' },
-        } : {
-          0: { cellWidth: 55, overflow: 'linebreak' },
-          1: { cellWidth: 45 },
-          2: { cellWidth: 65, overflow: 'linebreak' },
-          3: { cellWidth: 60, overflow: 'linebreak' },
-          4: { cellWidth: 30, halign: 'center' },
-          5: { cellWidth: 55, halign: 'right' },
-          6: { cellWidth: 55, halign: 'right' },
-          7: { cellWidth: 167, overflow: 'linebreak' },
-        })
-      : (detailHasMisc ? {
-          0: { cellWidth: 55, overflow: 'linebreak' },
-          1: { cellWidth: 42 },
-          2: { cellWidth: 60, overflow: 'linebreak' },
-          3: { cellWidth: 50, overflow: 'linebreak' },
-          4: { cellWidth: 25, halign: 'center' },
-          5: { cellWidth: 48, halign: 'right' },
-          6: { cellWidth: 45, halign: 'right' },
-          7: { cellWidth: 40, halign: 'right' },
-          8: { cellWidth: 40, halign: 'right' },
-          9: { cellWidth: 127, overflow: 'linebreak' },
-        } : {
-          0: { cellWidth: 55, overflow: 'linebreak' },
-          1: { cellWidth: 45 },
-          2: { cellWidth: 70, overflow: 'linebreak' },
-          3: { cellWidth: 60, overflow: 'linebreak' },
-          4: { cellWidth: 28, halign: 'center' },
-          5: { cellWidth: 52, halign: 'right' },
-          6: { cellWidth: 52, halign: 'right' },
-          7: { cellWidth: 170, overflow: 'linebreak' },
-        }),
+    columnStyles: detailColStyles,
     didParseCell: function(data) {
       if (data.section === 'body' && data.row.index === detailTotalsIndex) {
         data.cell.styles.fontStyle = 'bold'
@@ -491,13 +428,11 @@ async function buildInvoicePdf(
     const { PDFDocument } = await import('pdf-lib')
     const mainPdfBytes = doc.output('arraybuffer')
     const mainPdf = await PDFDocument.load(mainPdfBytes)
-
     if (matchedReceiptBuffer) {
       const receiptPdf = await PDFDocument.load(matchedReceiptBuffer)
       const receiptPages = await mainPdf.copyPages(receiptPdf, receiptPdf.getPageIndices())
       receiptPages.forEach(p => mainPdf.addPage(p))
     }
-
     const finalBytes = await mainPdf.save()
     return Buffer.from(finalBytes)
   } catch {
