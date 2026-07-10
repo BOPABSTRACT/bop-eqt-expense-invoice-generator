@@ -20,7 +20,7 @@ const MANAGER_OPTIONS = [
   'Kurt Stephens',
   'Mitchell Shwartz',
   'Sean Cotter',
-  'Torey Sochaki',
+  'Torrey Sochacki',
   'Wesley Rosenbaugh',
 ]
 
@@ -39,6 +39,8 @@ const AFE_OPTIONS = [
   { label: 'EQT Wetzel County WV Title/Curative AFE', afe: 'N34629.2401.1011' },
   { label: 'EQT Fayette Mineral Purchasing', afe: 'NTBD.2401.1014' },
   { label: 'EQT Fayette County Title/Curative AFE', afe: 'NTBD.2401.1011' },
+  { label: 'EQT Lycoming County Mineral Purchasing AFE', afe: 'NTBD.2401.1014' },
+  { label: 'EQT Lycoming County Title/Curative AFE', afe: 'NTBD.2401.1011' },
   { label: 'EQT Belmont Mineral Purchasing', afe: 'N34619.2401.1014' },
   { label: 'EQT Belmont County Title/Curative AFE', afe: 'N34619.2401.1011' },
   { label: 'EQT Marion Mineral Purchasing', afe: 'N34625.2401.1014' },
@@ -103,7 +105,6 @@ export default function Home() {
     setStatus('loading')
     setMessage('Generating invoices...')
 
-    // Find the AFE number from the selected key
     const selectedAfe = AFE_OPTIONS.find(o => o.afe === afeKey)
     const afeNumber = selectedAfe?.afe || ''
 
@@ -284,7 +285,7 @@ export default function Home() {
               <select value={afeKey} onChange={e => setAfeKey(e.target.value)} style={selectStyle}>
                 <option value="">— Select AFE —</option>
                 {AFE_OPTIONS.map(o => (
-                  <option key={o.afe} value={o.afe}>
+                  <option key={o.label} value={o.afe}>
                     {o.label} — {o.afe}
                   </option>
                 ))}
