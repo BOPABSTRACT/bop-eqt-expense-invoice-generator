@@ -97,8 +97,20 @@ async function buildInvoicePdf(
 
   // Detect template type from Summary header row (row index 17 = row 18 in Excel)
   const summaryHeaderRow = (summaryRows[17] as unknown[] ?? []).map(h => String(h ?? '').toLowerCase())
-  const isMileageTemplate = summaryHeaderRow.some(h => h.includes('mile') || h.includes('mileage'))
-  const isDayrateTemplate = !isMileageTemplate && summaryHeaderRow.some(h => h.includes('day') || h.includes('professional service'))
+  const isDayrateTemplate = summaryHeaderRow.some(h => h.includes('day') || h.includes('professional service')) &&
+    !summaryHeaderRow.some(h => h.includes('mile') || h.includes('mileage'))
+
+  const detailAllRows = detailSheet
+    ? (XLSX.utils.sheet_to_json(detailSheet, { header: 1, defval: '' }) as unknown[][])
+    : []
+  const detailHeaderRow = (detailAllRows[1] ?? []).map((h: unknown) => String(h).toLowerCase())
+  const detailIsDayrate = detailHeaderRow.some(h => h.includes('dayrate') || h.includes('day rate') || h.includes('labor total')) &&
+    !detailHeaderRow.some(h => h.includes('mile') || h.includes('mileage'))
+
+  const detailDataRows = detailAllRows.slice(2).filter(r => {
+    const row = r as unknown[]
+    return row[0] && String(row[0]).trim() !== ''
+  })
 
   const brokerRows: unknown[][] = []
   for (let i = 18; i < summaryRows.length; i++) {
@@ -107,19 +119,6 @@ async function buildInvoicePdf(
   }
   const brokerDataRows = brokerRows.filter(r => String((r as unknown[])[0]).toLowerCase() !== 'totals')
   const brokerTotalsRow = brokerRows.find(r => String((r as unknown[])[0]).toLowerCase() === 'totals')
-
-  // Detect detail sheet column layout
-  const detailAllRows = detailSheet
-    ? (XLSX.utils.sheet_to_json(detailSheet, { header: 1, defval: '' }) as unknown[][])
-    : []
-  const detailHeaderRow = (detailAllRows[1] ?? []).map((h: unknown) => String(h).toLowerCase())
-  const detailIsMileage = detailHeaderRow.some(h => h.includes('mile') || h.includes('mileage'))
-  const detailHasMisc = detailHeaderRow.some(h => h.includes('misc'))
-
-  const detailDataRows = detailAllRows.slice(2).filter(r => {
-    const row = r as unknown[]
-    return row[0] && String(row[0]).trim() !== ''
-  })
 
   const black: [number, number, number] = [0, 0, 0]
   const red: [number, number, number] = [255, 0, 0]
@@ -203,73 +202,69 @@ async function buildInvoicePdf(
 
   const tableStartY = Math.max(ly + 20, ry + 20)
 
+  // ============ SUMMARY TABLE ============
+  // Always use mileage-style display headers.
+  // For dayrate Excels: Miles col = blank, Mileage Amt = blank, Misc = col[4], TOTAL = col[5]
+  // For mileage Excels: Miles = col[4], Mileage Amt = col[5], Misc = col[6], TOTAL = col[7 or 6]
+
+  const summaryHasMisc = summaryHeaderRow.some(h => h.includes('misc'))
+  const summaryHasCopies = summaryHeaderRow.some(h => h.includes('cop'))
+
   let summaryHead: string[][]
   let summaryBody: string[][]
   let totalColIndex: number
 
-  if (isDayrateTemplate) {
-    // ---- DAYRATE TEMPLATE ----
-    // Summary cols: [0]=Broker [1]=Days [2]=AmtPerDay [3]=TotalProfServices [4]=Misc [5]=TOTAL
-    const hasMisc = summaryHeaderRow.some(h => h.includes('misc'))
-    if (hasMisc) {
-      summaryHead = [['Broker', 'Days', 'Day Rate', 'Professional\nServices', 'Miscellaneous', 'TOTAL']]
-      totalColIndex = 5
-      summaryBody = brokerDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), fmtNum(row[1], 0), fmtCurrency(row[2]), fmtCurrency(row[3]), fmtCurrency(row[4]), fmtCurrency(row[5])]
-      })
-      if (brokerTotalsRow) {
-        const t = brokerTotalsRow as unknown[]
-        summaryBody.push(['Totals', fmtNum(t[1], 0), fmtCurrency(t[2]), fmtCurrency(t[3]), fmtCurrency(t[4]), fmtCurrency(t[5])])
+  if (summaryHasMisc && summaryHasCopies) {
+    summaryHead = [['Broker', 'Miles\nDriven', 'Mileage Amt\n@ 0.7250/mile', 'Miscellaneous', 'Copies', 'TOTAL']]
+    totalColIndex = 5
+    summaryBody = brokerDataRows.map(r => {
+      const row = r as unknown[]
+      if (isDayrateTemplate) {
+        return [String(row[0] ?? ''), '0.0', '$0.00', fmtCurrency(row[3]), fmtCurrency(row[4]), fmtCurrency(row[5])]
       }
-    } else {
-      summaryHead = [['Broker', 'Days', 'Day Rate', 'Professional\nServices', 'TOTAL']]
-      totalColIndex = 4
-      summaryBody = brokerDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), fmtNum(row[1], 0), fmtCurrency(row[2]), fmtCurrency(row[3]), fmtCurrency(row[4])]
-      })
-      if (brokerTotalsRow) {
-        const t = brokerTotalsRow as unknown[]
-        summaryBody.push(['Totals', fmtNum(t[1], 0), fmtCurrency(t[2]), fmtCurrency(t[3]), fmtCurrency(t[4])])
+      return [String(row[0] ?? ''), fmtNum(row[4]), fmtCurrency(row[5]), fmtCurrency(row[6]), fmtCurrency(row[7]), fmtCurrency(row[8])]
+    })
+    if (brokerTotalsRow) {
+      const t = brokerTotalsRow as unknown[]
+      if (isDayrateTemplate) {
+        summaryBody.push(['Totals', '0.0', '$0.00', fmtCurrency(t[3]), fmtCurrency(t[4]), fmtCurrency(t[5])])
+      } else {
+        summaryBody.push(['Totals', fmtNum(t[4]), fmtCurrency(t[5]), fmtCurrency(t[6]), fmtCurrency(t[7]), fmtCurrency(t[8])])
+      }
+    }
+  } else if (summaryHasMisc) {
+    summaryHead = [['Broker', 'Miles\nDriven', 'Mileage Amt\n@ 0.7250/mile', 'Miscellaneous', 'TOTAL']]
+    totalColIndex = 4
+    summaryBody = brokerDataRows.map(r => {
+      const row = r as unknown[]
+      if (isDayrateTemplate) {
+        return [String(row[0] ?? ''), '0.0', '$0.00', fmtCurrency(row[4]), fmtCurrency(row[5])]
+      }
+      return [String(row[0] ?? ''), fmtNum(row[4]), fmtCurrency(row[5]), fmtCurrency(row[6]), fmtCurrency(row[7])]
+    })
+    if (brokerTotalsRow) {
+      const t = brokerTotalsRow as unknown[]
+      if (isDayrateTemplate) {
+        summaryBody.push(['Totals', '0.0', '$0.00', fmtCurrency(t[4]), fmtCurrency(t[5])])
+      } else {
+        summaryBody.push(['Totals', fmtNum(t[4]), fmtCurrency(t[5]), fmtCurrency(t[6]), fmtCurrency(t[7])])
       }
     }
   } else {
-    // ---- MILEAGE TEMPLATE (default) ----
-    // Summary cols: [0]=Broker [4]=Miles [5]=MileageAmt [6]=Misc [7]=TOTAL
-    const hasMisc = summaryHeaderRow.some(h => h.includes('misc'))
-    const hasCopies = summaryHeaderRow.some(h => h.includes('cop'))
-    if (hasMisc && hasCopies) {
-      summaryHead = [['Broker', 'Miles\nDriven', 'Mileage Amt\n@ 0.7250/mile', 'Miscellaneous', 'Copies', 'TOTAL']]
-      totalColIndex = 5
-      summaryBody = brokerDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), fmtNum(row[4]), fmtCurrency(row[5]), fmtCurrency(row[6]), fmtCurrency(row[7]), fmtCurrency(row[8])]
-      })
-      if (brokerTotalsRow) {
-        const t = brokerTotalsRow as unknown[]
-        summaryBody.push(['Totals', fmtNum(t[4]), fmtCurrency(t[5]), fmtCurrency(t[6]), fmtCurrency(t[7]), fmtCurrency(t[8])])
+    summaryHead = [['Broker', 'Miles\nDriven', 'Mileage Amt\n@ 0.7250/mile', 'TOTAL']]
+    totalColIndex = 3
+    summaryBody = brokerDataRows.map(r => {
+      const row = r as unknown[]
+      if (isDayrateTemplate) {
+        return [String(row[0] ?? ''), '0.0', '$0.00', fmtCurrency(row[5])]
       }
-    } else if (hasMisc) {
-      summaryHead = [['Broker', 'Miles\nDriven', 'Mileage Amt\n@ 0.7250/mile', 'Miscellaneous', 'TOTAL']]
-      totalColIndex = 4
-      summaryBody = brokerDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), fmtNum(row[4]), fmtCurrency(row[5]), fmtCurrency(row[6]), fmtCurrency(row[7])]
-      })
-      if (brokerTotalsRow) {
-        const t = brokerTotalsRow as unknown[]
-        summaryBody.push(['Totals', fmtNum(t[4]), fmtCurrency(t[5]), fmtCurrency(t[6]), fmtCurrency(t[7])])
-      }
-    } else {
-      summaryHead = [['Broker', 'Miles\nDriven', 'Mileage Amt\n@ 0.7250/mile', 'TOTAL']]
-      totalColIndex = 3
-      summaryBody = brokerDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), fmtNum(row[4]), fmtCurrency(row[5]), fmtCurrency(row[6])]
-      })
-      if (brokerTotalsRow) {
-        const t = brokerTotalsRow as unknown[]
+      return [String(row[0] ?? ''), fmtNum(row[4]), fmtCurrency(row[5]), fmtCurrency(row[6])]
+    })
+    if (brokerTotalsRow) {
+      const t = brokerTotalsRow as unknown[]
+      if (isDayrateTemplate) {
+        summaryBody.push(['Totals', '0.0', '$0.00', fmtCurrency(t[5])])
+      } else {
         summaryBody.push(['Totals', fmtNum(t[4]), fmtCurrency(t[5]), fmtCurrency(t[6])])
       }
     }
@@ -288,7 +283,7 @@ async function buildInvoicePdf(
       0: { cellWidth: 110 },
       1: { halign: 'center', cellWidth: 55 },
       2: { halign: 'right', cellWidth: 90 },
-      3: { halign: 'right', cellWidth: 90 },
+      3: { halign: 'right', cellWidth: summaryHasMisc ? 80 : 90 },
       4: { halign: 'right', cellWidth: 80 },
       5: { halign: 'right', cellWidth: 80 },
     },
@@ -321,88 +316,68 @@ async function buildInvoicePdf(
   doc.setLineWidth(0.5)
   doc.line(40, 52, 572, 52)
 
+  // Detail table — always mileage-style display
+  // Dayrate Excel cols: [0]=Landman [1]=Date [2]=Prospect [3]=Legal [4]=Focus [5]=Days [6]=DayrateAmt [7]=LaborTotal [8]=Misc [9]=MiscDesc [10]=Total [11]=Description
+  // Mileage Excel cols: [0]=Landman [1]=Date [2]=Prospect [3]=Legal ... [8]=Miles [9]=MileageAmt [10/11]=Misc [11/13]=Total [12/14]=Description
+
+  const detailHasMisc = detailHeaderRow.some(h => h.includes('misc'))
+
   let detailHead: string[][]
   let detailBody: string[][]
   let detailTotalCol: number
 
-  if (detailIsMileage) {
-    // ---- MILEAGE DETAIL ----
+  if (detailHasMisc) {
+    detailHead = [['Landman', 'Date', 'Prospect', 'Legal', 'Miles', 'Mileage\n0.7250/mi', 'Misc.', 'Total', 'Description']]
+    detailTotalCol = 7
     let totalMiles = 0, totalMileageAmt = 0, totalMisc = 0, totalTotal = 0
     detailDataRows.forEach(r => {
       const row = r as unknown[]
-      totalMiles += Number(row[8] ?? 0)
-      totalMileageAmt += Number(row[9] ?? 0)
-      if (detailHasMisc) {
-        totalMisc += Number(row[11] ?? 0)
-        totalTotal += Number(row[13] ?? 0)
-      } else {
-        totalTotal += Number(row[11] ?? 0)
-      }
-    })
-    if (detailHasMisc) {
-      detailHead = [['Landman', 'Date', 'Prospect', 'Legal', 'Miles', 'Mileage\n0.7250/mi', 'Misc.', 'Total', 'Description']]
-      detailTotalCol = 7
-      detailBody = detailDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[8], 1), fmtCurrency(row[9]), fmtCurrency(row[11]), fmtCurrency(row[13]), String(row[14] ?? '')]
-      })
-      detailBody.push(['Totals', '', '', '', fmtNum(totalMiles, 1), fmtCurrency(totalMileageAmt), fmtCurrency(totalMisc), fmtCurrency(totalTotal), ''])
-    } else {
-      detailHead = [['Landman', 'Date', 'Prospect', 'Legal', 'Miles', 'Mileage\n0.7250/mi', 'Total', 'Description']]
-      detailTotalCol = 6
-      detailBody = detailDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[8], 1), fmtCurrency(row[9]), fmtCurrency(row[11]), String(row[12] ?? '')]
-      })
-      detailBody.push(['Totals', '', '', '', fmtNum(totalMiles, 1), fmtCurrency(totalMileageAmt), fmtCurrency(totalTotal), ''])
-    }
-  } else {
-    // ---- DAYRATE DETAIL ----
-    // cols: [0]=Landman [1]=Date [2]=Prospect [3]=Legal [4]=ProjectFocus [5]=Days [6]=DayrateAmt [7]=LaborTotal [8]=Misc [9]=MiscDesc [10]=Total [11]=Description
-    let totalDays = 0, totalLabor = 0, totalMisc = 0, totalTotal = 0
-    detailDataRows.forEach(r => {
-      const row = r as unknown[]
-      totalDays += Number(row[5] ?? 0)
-      totalLabor += Number(row[7] ?? 0)
-      if (detailHasMisc) {
+      if (detailIsDayrate) {
         totalMisc += Number(row[8] ?? 0)
         totalTotal += Number(row[10] ?? 0)
       } else {
-        totalTotal += Number(row[7] ?? 0)
+        totalMiles += Number(row[8] ?? 0)
+        totalMileageAmt += Number(row[9] ?? 0)
+        totalMisc += Number(row[11] ?? 0)
+        totalTotal += Number(row[13] ?? 0)
       }
     })
-    if (detailHasMisc) {
-      detailHead = [['Landman', 'Date', 'Prospect', 'Legal', 'Days', 'Day Rate', 'Labor\nTotal', 'Misc.', 'Total', 'Description']]
-      detailTotalCol = 8
-      detailBody = detailDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[5], 0), fmtCurrency(row[6]), fmtCurrency(row[7]), fmtCurrency(row[8]), fmtCurrency(row[10]), String(row[11] ?? '')]
-      })
-      detailBody.push(['Totals', '', '', '', fmtNum(totalDays, 0), '', fmtCurrency(totalLabor), fmtCurrency(totalMisc), fmtCurrency(totalTotal), ''])
-    } else {
-      detailHead = [['Landman', 'Date', 'Prospect', 'Legal', 'Days', 'Day Rate', 'Labor\nTotal', 'Description']]
-      detailTotalCol = 6
-      detailBody = detailDataRows.map(r => {
-        const row = r as unknown[]
-        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[5], 0), fmtCurrency(row[6]), fmtCurrency(row[7]), String(row[11] ?? '')]
-      })
-      detailBody.push(['Totals', '', '', '', fmtNum(totalDays, 0), '', fmtCurrency(totalTotal), ''])
-    }
+    detailBody = detailDataRows.map(r => {
+      const row = r as unknown[]
+      if (detailIsDayrate) {
+        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), '0.0', '$0.00', fmtCurrency(row[8]), fmtCurrency(row[10]), String(row[11] ?? '')]
+      }
+      return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[8], 1), fmtCurrency(row[9]), fmtCurrency(row[11]), fmtCurrency(row[13]), String(row[14] ?? '')]
+    })
+    detailBody.push(['Totals', '', '', '', fmtNum(totalMiles, 1), fmtCurrency(totalMileageAmt), fmtCurrency(totalMisc), fmtCurrency(totalTotal), ''])
+  } else {
+    detailHead = [['Landman', 'Date', 'Prospect', 'Legal', 'Miles', 'Mileage\n0.7250/mi', 'Total', 'Description']]
+    detailTotalCol = 6
+    let totalMiles = 0, totalMileageAmt = 0, totalTotal = 0
+    detailDataRows.forEach(r => {
+      const row = r as unknown[]
+      if (detailIsDayrate) {
+        totalTotal += Number(row[7] ?? 0)
+      } else {
+        totalMiles += Number(row[8] ?? 0)
+        totalMileageAmt += Number(row[9] ?? 0)
+        totalTotal += Number(row[11] ?? 0)
+      }
+    })
+    detailBody = detailDataRows.map(r => {
+      const row = r as unknown[]
+      if (detailIsDayrate) {
+        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), '0.0', '$0.00', fmtCurrency(row[7]), String(row[11] ?? '')]
+      }
+      return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[8], 1), fmtCurrency(row[9]), fmtCurrency(row[11]), String(row[12] ?? '')]
+    })
+    detailBody.push(['Totals', '', '', '', fmtNum(totalMiles, 1), fmtCurrency(totalMileageAmt), fmtCurrency(totalTotal), ''])
   }
 
   const detailTotalsIndex = detailBody.length - 1
 
-  const mileageMiscCols = { 0: { cellWidth: 55 }, 1: { cellWidth: 45 }, 2: { cellWidth: 60 }, 3: { cellWidth: 55 }, 4: { cellWidth: 30, halign: 'center' as const }, 5: { cellWidth: 52, halign: 'right' as const }, 6: { cellWidth: 45, halign: 'right' as const }, 7: { cellWidth: 45, halign: 'right' as const }, 8: { cellWidth: 145 } }
-  const mileageNoMiscCols = { 0: { cellWidth: 55 }, 1: { cellWidth: 45 }, 2: { cellWidth: 65 }, 3: { cellWidth: 60 }, 4: { cellWidth: 30, halign: 'center' as const }, 5: { cellWidth: 55, halign: 'right' as const }, 6: { cellWidth: 55, halign: 'right' as const }, 7: { cellWidth: 167 } }
-  const dayrateMiscCols = { 0: { cellWidth: 55 }, 1: { cellWidth: 42 }, 2: { cellWidth: 60 }, 3: { cellWidth: 50 }, 4: { cellWidth: 25, halign: 'center' as const }, 5: { cellWidth: 48, halign: 'right' as const }, 6: { cellWidth: 45, halign: 'right' as const }, 7: { cellWidth: 40, halign: 'right' as const }, 8: { cellWidth: 40, halign: 'right' as const }, 9: { cellWidth: 127 } }
-  const dayrateNoMiscCols = { 0: { cellWidth: 55 }, 1: { cellWidth: 45 }, 2: { cellWidth: 70 }, 3: { cellWidth: 60 }, 4: { cellWidth: 28, halign: 'center' as const }, 5: { cellWidth: 52, halign: 'right' as const }, 6: { cellWidth: 52, halign: 'right' as const }, 7: { cellWidth: 170 } }
-
-  let detailColStyles: Record<number, object>
-  if (detailIsMileage) {
-    detailColStyles = detailHasMisc ? mileageMiscCols : mileageNoMiscCols
-  } else {
-    detailColStyles = detailHasMisc ? dayrateMiscCols : dayrateNoMiscCols
-  }
+  const detailMiscCols = { 0: { cellWidth: 55 }, 1: { cellWidth: 45 }, 2: { cellWidth: 60 }, 3: { cellWidth: 55 }, 4: { cellWidth: 30, halign: 'center' as const }, 5: { cellWidth: 52, halign: 'right' as const }, 6: { cellWidth: 45, halign: 'right' as const }, 7: { cellWidth: 45, halign: 'right' as const }, 8: { cellWidth: 145 } }
+  const detailNoMiscCols = { 0: { cellWidth: 55 }, 1: { cellWidth: 45 }, 2: { cellWidth: 65 }, 3: { cellWidth: 60 }, 4: { cellWidth: 30, halign: 'center' as const }, 5: { cellWidth: 55, halign: 'right' as const }, 6: { cellWidth: 55, halign: 'right' as const }, 7: { cellWidth: 167 } }
 
   autoTable(doc, {
     startY: 60,
@@ -411,7 +386,7 @@ async function buildInvoicePdf(
     theme: 'grid',
     styles: { font: 'helvetica', fontSize: 7, textColor: black, fillColor: white, cellPadding: 3, lineColor: black, lineWidth: 0.3, overflow: 'linebreak', valign: 'top' },
     headStyles: { textColor: black, fillColor: headerBg, fontStyle: 'bold', halign: 'center', valign: 'middle' },
-    columnStyles: detailColStyles,
+    columnStyles: detailHasMisc ? detailMiscCols : detailNoMiscCols,
     didParseCell: function(data) {
       if (data.section === 'body' && data.row.index === detailTotalsIndex) {
         data.cell.styles.fontStyle = 'bold'
