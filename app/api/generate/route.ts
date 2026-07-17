@@ -66,6 +66,15 @@ function matchReceipt(invoiceNum: string, receiptFiles: { name: string; buffer: 
   return null
 }
 
+// Find the summary header row index by scanning for 'broker' in column 0
+function findSummaryHeaderRow(summaryRows: unknown[][]): number {
+  for (let i = 0; i < summaryRows.length; i++) {
+    const row = summaryRows[i] as unknown[]
+    if (row && String(row[0] ?? '').toLowerCase().trim() === 'broker') return i
+  }
+  return 17 // fallback
+}
+
 async function buildInvoicePdf(
   excelBuffer: Buffer,
   companyName: string,
@@ -92,33 +101,49 @@ async function buildInvoicePdf(
   const afeFromSheet = String((summaryRows[9] as unknown[])?.[5] ?? '')
   const afe = afeOverride || afeFromSheet
   const attn = manager ? `Attn: ${manager}` : String((summaryRows[10] as unknown[])?.[1] ?? '')
-  const period = String((summaryRows[15] as unknown[])?.[1] ?? '')
   const county = countyOverride || ''
 
-  // Detect template type from Summary header row (row index 17 = row 18 in Excel)
-  const summaryHeaderRow = (summaryRows[17] as unknown[] ?? []).map(h => String(h ?? '').toLowerCase())
+  // Find period — scan for 'period' label in col 0
+  let period = ''
+  for (let i = 0; i < summaryRows.length; i++) {
+    if (String((summaryRows[i] as unknown[])?.[0] ?? '').toLowerCase().includes('period')) {
+      period = String((summaryRows[i] as unknown[])?.[1] ?? '')
+      break
+    }
+  }
+
+  // Find header row dynamically
+  const headerRowIdx = findSummaryHeaderRow(summaryRows)
+  const summaryHeaderRow = (summaryRows[headerRowIdx] as unknown[] ?? []).map(h => String(h ?? '').toLowerCase())
   const isDayrateTemplate = summaryHeaderRow.some(h => h.includes('day') || h.includes('professional service')) &&
     !summaryHeaderRow.some(h => h.includes('mile') || h.includes('mileage'))
 
-  const detailAllRows = detailSheet
-    ? (XLSX.utils.sheet_to_json(detailSheet, { header: 1, defval: '' }) as unknown[][])
-    : []
-  const detailHeaderRow = (detailAllRows[1] ?? []).map((h: unknown) => String(h).toLowerCase())
-  const detailIsDayrate = detailHeaderRow.some(h => h.includes('dayrate') || h.includes('day rate') || h.includes('labor total')) &&
-    !detailHeaderRow.some(h => h.includes('mile') || h.includes('mileage'))
-
-  const detailDataRows = detailAllRows.slice(2).filter(r => {
-    const row = r as unknown[]
-    return row[0] && String(row[0]).trim() !== ''
-  })
-
+  // Collect broker data rows (start after header row)
   const brokerRows: unknown[][] = []
-  for (let i = 18; i < summaryRows.length; i++) {
+  for (let i = headerRowIdx + 1; i < summaryRows.length; i++) {
     const row = summaryRows[i] as unknown[]
     if (row && row[0] && String(row[0]).trim()) brokerRows.push(row)
   }
   const brokerDataRows = brokerRows.filter(r => String((r as unknown[])[0]).toLowerCase() !== 'totals')
   const brokerTotalsRow = brokerRows.find(r => String((r as unknown[])[0]).toLowerCase() === 'totals')
+
+  // Detail sheet
+  const detailAllRows = detailSheet
+    ? (XLSX.utils.sheet_to_json(detailSheet, { header: 1, defval: '' }) as unknown[][])
+    : []
+  const detailHeaderRow = (detailAllRows[1] ?? []).map((h: unknown) => String(h).toLowerCase())
+  const detailIsDayrate = detailHeaderRow.some(h => h.includes('day') || h.includes('dayrate') || h.includes('labor')) &&
+    !detailHeaderRow.some(h => h.includes('mile') || h.includes('mileage'))
+  const detailHasMisc = detailHeaderRow.some(h => h.includes('misc'))
+
+  // Detect if detail has a separate dayrate/labor column or goes straight Days→Misc→Total
+  // If header has 'day rate' or 'labor total' it's the full dayrate layout; if just 'days' then simplified
+  const detailHasDayRate = detailHeaderRow.some(h => h.includes('day rate') || h.includes('dayrate') || h.includes('labor total') || h.includes('amt. per day'))
+
+  const detailDataRows = detailAllRows.slice(2).filter(r => {
+    const row = r as unknown[]
+    return row[0] && String(row[0]).trim() !== ''
+  })
 
   const black: [number, number, number] = [0, 0, 0]
   const red: [number, number, number] = [255, 0, 0]
@@ -203,9 +228,9 @@ async function buildInvoicePdf(
   const tableStartY = Math.max(ly + 20, ry + 20)
 
   // ============ SUMMARY TABLE ============
-  // Always use mileage-style display headers.
-  // For dayrate Excels: Miles col = blank, Mileage Amt = blank, Misc = col[4], TOTAL = col[5]
-  // For mileage Excels: Miles = col[4], Mileage Amt = col[5], Misc = col[6], TOTAL = col[7 or 6]
+  // Always display mileage-style headers; map dayrate cols correctly
+  // Dayrate full (col[4]=Misc, col[5]=TOTAL)
+  // Mileage (col[4]=Miles, col[5]=MileageAmt, col[6]=Misc, col[7]=TOTAL)
 
   const summaryHasMisc = summaryHeaderRow.some(h => h.includes('misc'))
   const summaryHasCopies = summaryHeaderRow.some(h => h.includes('cop'))
@@ -316,12 +341,6 @@ async function buildInvoicePdf(
   doc.setLineWidth(0.5)
   doc.line(40, 52, 572, 52)
 
-  // Detail table — always mileage-style display
-  // Dayrate Excel cols: [0]=Landman [1]=Date [2]=Prospect [3]=Legal [4]=Focus [5]=Days [6]=DayrateAmt [7]=LaborTotal [8]=Misc [9]=MiscDesc [10]=Total [11]=Description
-  // Mileage Excel cols: [0]=Landman [1]=Date [2]=Prospect [3]=Legal ... [8]=Miles [9]=MileageAmt [10/11]=Misc [11/13]=Total [12/14]=Description
-
-  const detailHasMisc = detailHeaderRow.some(h => h.includes('misc'))
-
   let detailHead: string[][]
   let detailBody: string[][]
   let detailTotalCol: number
@@ -333,8 +352,15 @@ async function buildInvoicePdf(
     detailDataRows.forEach(r => {
       const row = r as unknown[]
       if (detailIsDayrate) {
-        totalMisc += Number(row[8] ?? 0)
-        totalTotal += Number(row[10] ?? 0)
+        if (detailHasDayRate) {
+          // Full dayrate: [0]=Landman [1]=Date [2]=Prospect [3]=Legal [4]=Focus [5]=Days [6]=Rate [7]=Labor [8]=Misc [9]=MiscDesc [10]=Total [11]=Desc
+          totalMisc += Number(row[8] ?? 0)
+          totalTotal += Number(row[10] ?? 0)
+        } else {
+          // Simplified dayrate: [0]=Landman [1]=Date [2]=Prospect [3]=Legal [4]=Days [5]=Misc [6]=Total [7]=Desc
+          totalMisc += Number(row[5] ?? 0)
+          totalTotal += Number(row[6] ?? 0)
+        }
       } else {
         totalMiles += Number(row[8] ?? 0)
         totalMileageAmt += Number(row[9] ?? 0)
@@ -345,7 +371,11 @@ async function buildInvoicePdf(
     detailBody = detailDataRows.map(r => {
       const row = r as unknown[]
       if (detailIsDayrate) {
-        return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), '0.0', '$0.00', fmtCurrency(row[8]), fmtCurrency(row[10]), String(row[11] ?? '')]
+        if (detailHasDayRate) {
+          return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), '0.0', '$0.00', fmtCurrency(row[8]), fmtCurrency(row[10]), String(row[11] ?? '')]
+        } else {
+          return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), '0.0', '$0.00', fmtCurrency(row[5]), fmtCurrency(row[6]), String(row[7] ?? '')]
+        }
       }
       return [String(row[0] ?? ''), formatDate(row[1]), String(row[2] ?? ''), String(row[3] ?? ''), fmtNum(row[8], 1), fmtCurrency(row[9]), fmtCurrency(row[11]), fmtCurrency(row[13]), String(row[14] ?? '')]
     })
@@ -444,7 +474,14 @@ export async function POST(req: NextRequest) {
       const invoiceNum = String((rows[7] as unknown[])?.[5] ?? '').trim() ||
         (excelFile.name.match(/(\d{5,})/)?.[1] ?? 'UNKNOWN')
 
-      const period = String((rows[15] as unknown[])?.[1] ?? '').trim()
+      // Find period dynamically
+      let period = ''
+      for (let i = 0; i < rows.length; i++) {
+        if (String((rows[i] as unknown[])?.[0] ?? '').toLowerCase().includes('period')) {
+          period = String((rows[i] as unknown[])?.[1] ?? '').trim()
+          break
+        }
+      }
       const fileDateStr = period ? extractPeriodEndDate(period) : filenameDateFormat(rawDate)
 
       const matchedReceipt = matchReceipt(invoiceNum, receiptData)
